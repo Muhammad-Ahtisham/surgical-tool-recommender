@@ -158,3 +158,4 @@ if st.button("🔍 Get Hybrid Recommendations"):
             st.warning("No recommendations found using hybrid method.")
     else:
         st.warning("No purchase history found for the specified user.")
+
