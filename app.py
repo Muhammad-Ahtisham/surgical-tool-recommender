@@ -8,7 +8,7 @@ from typing import List, Tuple
 # Data Loading and Caching
 # --------------------------
 @st.cache_data
-def load_data(user_file: str, tools_file: str) -> Tuple[pd.DataFrame, List[str], pd.DataFrame]:
+def load_data(user_file: str, tools_file: str) -> Tuple[pd.DataFrame, List[str], pd.DataFrame, pd.DataFrame]:
     """
     Load and preprocess user purchase history and tool metadata.
     
@@ -17,7 +17,7 @@ def load_data(user_file: str, tools_file: str) -> Tuple[pd.DataFrame, List[str],
         tools_file (str): Path to the Excel file containing product metadata.
 
     Returns:
-        Tuple of rules DataFrame, product code list, and product metadata DataFrame.
+        Tuple of rules DataFrame, product code list, user data, and product metadata DataFrame.
     """
     df_users = pd.read_excel(user_file)
     df_tools = pd.read_excel(tools_file)
@@ -28,10 +28,10 @@ def load_data(user_file: str, tools_file: str) -> Tuple[pd.DataFrame, List[str],
     transaction_array = encoder.fit(transactions).transform(transactions)
     df_encoded = pd.DataFrame(transaction_array, columns=encoder.columns_)
 
-    frequent_itemsets = apriori(df_encoded, min_support=0.2, use_colnames=True)
-    rules = association_rules(frequent_itemsets, metric="lift", min_threshold=1.0)
+    frequent_itemsets = apriori(df_encoded, min_support=0.01, use_colnames=True)
+    rules = association_rules(frequent_itemsets, metric="lift", min_threshold=0.5)
 
-    return rules, list(encoder.columns_), df_tools
+    return rules, list(encoder.columns_), df_users, df_tools
 
 
 # --------------------------
@@ -42,8 +42,10 @@ def recommend_products(purchased_items: List[str], rules_df: pd.DataFrame, top_n
     matches = []
 
     for _, row in rules_df.iterrows():
-        if row['antecedents'].issubset(purchased_set):
-            matches.append((row['consequents'], row['confidence'], row['lift']))
+        antecedents = set(row['antecedents']) if isinstance(row['antecedents'], frozenset) else row['antecedents']
+        consequents = set(row['consequents']) if isinstance(row['consequents'], frozenset) else row['consequents']
+        if antecedents.issubset(purchased_set):
+            matches.append((consequents, row['confidence'], row['lift']))
 
     sorted_matches = sorted(matches, key=lambda x: (x[1], x[2]), reverse=True)
     recommendations = []
@@ -71,7 +73,7 @@ def get_product_details(recommendations: List[str], df_tools: pd.DataFrame) -> p
     Returns:
         pd.DataFrame: Filtered product info.
     """
-    filtered_tools = df_tools[df_tools['Title'].str.contains('|'.join(recommendations), case=False)]
+    filtered_tools = df_tools[df_tools['Title'].apply(lambda x: any(code.lower() in x.lower() for code in recommendations))]
     return filtered_tools
 
 
@@ -84,7 +86,7 @@ st.title("📈 Surgical Tool Recommendation System")
 USER_FILE = "surgical_tool_recommendation_users.xlsx"
 TOOLS_FILE = "Tools_2.xlsx"
 
-rules, product_list, df_tools = load_data(USER_FILE, TOOLS_FILE)
+rules, product_list, df_users, df_tools = load_data(USER_FILE, TOOLS_FILE)
 
 selected_tools = st.multiselect("Select previously purchased tools:", product_list)
 
@@ -101,8 +103,8 @@ if st.button("Get Recommendations"):
                     st.write(f"**Price:** {row['Price']}  ")
                     st.write("---")
             else:
-                st.info("Recommendations found, but no detailed info available in Tools_2.xlsx.")
+                st.warning("Recommendations generated but no matching product metadata found.")
         else:
-            st.info("No strong recommendations found for the selected tools.")
+            st.warning("No association rules matched your selection. Try selecting more or different tools.")
     else:
         st.warning("Please select at least one tool to get recommendations.")
