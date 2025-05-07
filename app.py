@@ -1,24 +1,15 @@
+
 import streamlit as st
 import pandas as pd
+from typing import List, Tuple
 from mlxtend.frequent_patterns import apriori, association_rules
 from mlxtend.preprocessing import TransactionEncoder
-from typing import List, Tuple
 
 # --------------------------
 # Data Loading and Caching
 # --------------------------
 @st.cache_data
 def load_data(user_file: str, tools_file: str) -> Tuple[pd.DataFrame, List[str], pd.DataFrame, pd.DataFrame]:
-    """
-    Load and preprocess user purchase history and tool metadata.
-
-    Args:
-        user_file (str): Path to the Excel file containing user purchases.
-        tools_file (str): Path to the Excel file containing product metadata.
-
-    Returns:
-        Tuple of rules DataFrame, product code list, user data, and product metadata DataFrame.
-    """
     df_users = pd.read_excel(user_file)
     df_tools = pd.read_excel(tools_file)
 
@@ -37,7 +28,7 @@ def load_data(user_file: str, tools_file: str) -> Tuple[pd.DataFrame, List[str],
 # --------------------------
 # Recommendation Logic
 # --------------------------
-def recommend_products(purchased_items: List[str], rules_df: pd.DataFrame, top_n: int = 5) -> List[str]:
+def recommend_by_apriori(purchased_items: List[str], rules_df: pd.DataFrame, top_n: int = 5) -> List[str]:
     purchased_set = set(purchased_items)
     matches = []
 
@@ -62,17 +53,65 @@ def recommend_products(purchased_items: List[str], rules_df: pd.DataFrame, top_n
     return recommendations
 
 
+def recommend_by_similarity(target_purchases: List[str], df_users: pd.DataFrame, top_n: int = 5) -> List[str]:
+    target_set = set(target_purchases)
+    similarities = []
+
+    for _, row in df_users.iterrows():
+        other_purchases_str = row['previousPurchases']
+        if pd.isna(other_purchases_str):
+            continue
+        other_set = set(other_purchases_str.split('|'))
+        if not other_set or other_set == target_set:
+            continue
+
+        intersection = target_set.intersection(other_set)
+        union = target_set.union(other_set)
+        similarity = len(intersection) / len(union)
+
+        if similarity > 0:
+            similarities.append((similarity, other_set))
+
+    similarities.sort(reverse=True, key=lambda x: x[0])
+    recommended_items = []
+
+    for sim, other_set in similarities:
+        for item in other_set:
+            if item not in target_set and item not in recommended_items:
+                recommended_items.append(item)
+            if len(recommended_items) >= top_n:
+                break
+        if len(recommended_items) >= top_n:
+            break
+
+    return recommended_items
+
+
+def hybrid_recommendation(purchased_items: List[str], rules_df: pd.DataFrame, df_users: pd.DataFrame, top_n: int = 5) -> List[str]:
+    recs_apriori = recommend_by_apriori(purchased_items, rules_df, top_n * 2)
+    recs_similar = recommend_by_similarity(purchased_items, df_users, top_n * 2)
+
+    hybrid = []
+    seen = set(purchased_items)
+
+    for item in recs_apriori:
+        if item not in seen:
+            hybrid.append(item)
+            seen.add(item)
+        if len(hybrid) >= top_n:
+            break
+
+    for item in recs_similar:
+        if item not in seen:
+            hybrid.append(item)
+            seen.add(item)
+        if len(hybrid) >= top_n:
+            break
+
+    return hybrid
+
+
 def get_product_details(recommendations: List[str], df_tools: pd.DataFrame) -> pd.DataFrame:
-    """
-    Match recommended product codes to tool metadata.
-
-    Args:
-        recommendations (List[str]): List of recommended product codes.
-        df_tools (pd.DataFrame): Product metadata DataFrame.
-
-    Returns:
-        pd.DataFrame: Filtered product info.
-    """
     filtered_tools = df_tools[df_tools['Title'].apply(lambda x: any(code.lower() in x.lower() for code in recommendations))]
     return filtered_tools
 
@@ -81,14 +120,14 @@ def get_product_details(recommendations: List[str], df_tools: pd.DataFrame) -> p
 # Streamlit Web Interface
 # --------------------------
 st.set_page_config(page_title="Surgical Tool Recommender", layout="centered")
-st.title("📈 Surgical Tool Recommendation System")
+st.title("🔬 Surgical Tool Recommendation System (Hybrid AI)")
 
 USER_FILE = "surgical_tool_recommendation_users.xlsx"
 TOOLS_FILE = "Tools_2.xlsx"
 
 rules, product_list, df_users, df_tools = load_data(USER_FILE, TOOLS_FILE)
 
-specific_user_id = "U0001"  # <-- Set your specific user ID here
+specific_user_id = "U0001"
 user_data = df_users[df_users['userID'] == specific_user_id]
 purchased = []
 if not user_data.empty:
@@ -96,11 +135,11 @@ if not user_data.empty:
     if pd.notna(purchase_str):
         purchased = purchase_str.split('|')
 
-if st.button("Get Recommendations for Specific User"):
+if st.button("Get Hybrid Recommendations for Specific User"):
     if purchased:
-        recs = recommend_products(purchased, rules)
+        recs = hybrid_recommendation(purchased, rules, df_users)
         if recs:
-            st.success(f"Recommended Products for {specific_user_id}:")
+            st.success(f"Hybrid Recommendations for {specific_user_id}:")
             detailed = get_product_details(recs, df_tools)
             if not detailed.empty:
                 for _, row in detailed.iterrows():
@@ -113,6 +152,6 @@ if st.button("Get Recommendations for Specific User"):
                 for item in recs:
                     st.write(f"- {item}")
         else:
-            st.warning("No association rules matched this user's purchase history.")
+            st.warning("No recommendations found using hybrid method.")
     else:
         st.warning("No purchase history found for the specified user.")
