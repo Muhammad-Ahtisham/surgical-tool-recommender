@@ -127,15 +127,18 @@ TOOLS_FILE = "Tools_2.xlsx"
 
 rules, product_list, df_users, df_tools = load_data(USER_FILE, TOOLS_FILE)
 
-specific_user_id = "U0001"
+
+user_ids = df_users['userID'].dropna().unique().tolist()
+specific_user_id = st.selectbox("Select User ID:", sorted(user_ids))
 user_data = df_users[df_users['userID'] == specific_user_id]
+
 purchased = []
 if not user_data.empty:
     purchase_str = user_data.iloc[0]['previousPurchases']
     if pd.notna(purchase_str):
         purchased = purchase_str.split('|')
 
-if st.button("Get Hybrid Recommendations for Specific User"):
+if st.button("🔍 Get Hybrid Recommendations"):
     if purchased:
         recs = hybrid_recommendation(purchased, rules, df_users)
         if recs:
