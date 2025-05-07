@@ -88,8 +88,8 @@ TOOLS_FILE = "Tools_2.xlsx"
 
 rules, product_list, df_users, df_tools = load_data(USER_FILE, TOOLS_FILE)
 
-specific_user_id = "user_123"  # <-- Set your specific user ID here
-user_data = df_users[df_users['user_id'] == specific_user_id]
+specific_user_id = "U0001"  # <-- Set your specific user ID here
+user_data = df_users[df_users['userID'] == specific_user_id]
 purchased = []
 if not user_data.empty:
     purchase_str = user_data.iloc[0]['previousPurchases']
