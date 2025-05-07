@@ -11,7 +11,7 @@ from typing import List, Tuple
 def load_data(user_file: str, tools_file: str) -> Tuple[pd.DataFrame, List[str], pd.DataFrame, pd.DataFrame]:
     """
     Load and preprocess user purchase history and tool metadata.
-    
+
     Args:
         user_file (str): Path to the Excel file containing user purchases.
         tools_file (str): Path to the Excel file containing product metadata.
@@ -39,19 +39,15 @@ def load_data(user_file: str, tools_file: str) -> Tuple[pd.DataFrame, List[str],
 # --------------------------
 def recommend_products(purchased_items: List[str], rules_df: pd.DataFrame, top_n: int = 5) -> List[str]:
     purchased_set = set(purchased_items)
-    matches = []
 
-    for _, row in rules_df.iterrows():
-        antecedents = set(row['antecedents']) if isinstance(row['antecedents'], frozenset) else row['antecedents']
-        consequents = set(row['consequents']) if isinstance(row['consequents'], frozenset) else row['consequents']
-        if antecedents.issubset(purchased_set):
-            matches.append((consequents, row['confidence'], row['lift']))
+    # Filter rules where antecedents are a subset of purchased items
+    filtered_rules = rules_df[rules_df['antecedents'].apply(lambda x: x.issubset(purchased_set))]
 
-    sorted_matches = sorted(matches, key=lambda x: (x[1], x[2]), reverse=True)
+    sorted_rules = filtered_rules.sort_values(by=['confidence', 'lift'], ascending=False)
+
     recommendations = []
-
-    for consequents, _, _ in sorted_matches:
-        for item in consequents:
+    for _, row in sorted_rules.iterrows():
+        for item in row['consequents']:
             if item not in purchased_set and item not in recommendations:
                 recommendations.append(item)
             if len(recommendations) >= top_n:
@@ -81,7 +77,7 @@ def get_product_details(recommendations: List[str], df_tools: pd.DataFrame) -> p
 # Streamlit Web Interface
 # --------------------------
 st.set_page_config(page_title="Surgical Tool Recommender", layout="centered")
-st.title("📈 Surgical Tool Recommendation System")
+st.title("\U0001F4C8 Surgical Tool Recommendation System")
 
 USER_FILE = "surgical_tool_recommendation_users.xlsx"
 TOOLS_FILE = "Tools_2.xlsx"
@@ -92,19 +88,21 @@ selected_tools = st.multiselect("Select previously purchased tools:", product_li
 
 if st.button("Get Recommendations"):
     if selected_tools:
-        recs = recommend_products(selected_tools, rules)
-        if recs:
-            st.success("Recommended Products:")
-            detailed = get_product_details(recs, df_tools)
-            if not detailed.empty:
-                for _, row in detailed.iterrows():
-                    st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
-                    st.image(row['Image'], width=150)
-                    st.write(f"**Price:** {row['Price']}  ")
-                    st.write("---")
+        with st.spinner("Generating recommendations..."):
+            recs = recommend_products(selected_tools, rules)
+            if recs:
+                st.success("Recommended Products:")
+                detailed = get_product_details(recs, df_tools)
+                if not detailed.empty:
+                    for _, row in detailed.iterrows():
+                        st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
+                        st.image(row['Image'], width=150)
+                        st.write(f"**Price:** {row['Price']}  ")
+                        st.write("---")
+                else:
+                    st.warning("Recommendations generated but no matching product metadata found.")
+                    st.write("Raw product codes:", recs)
             else:
-                st.warning("Recommendations generated but no matching product metadata found.")
-        else:
-            st.warning("No association rules matched your selection. Try selecting more or different tools.")
+                st.warning("No association rules matched your selection. Try selecting more or different tools.")
     else:
         st.warning("Please select at least one tool to get recommendations.")
