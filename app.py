@@ -8,45 +8,36 @@ from typing import List, Tuple
 # Data Loading and Caching
 # --------------------------
 @st.cache_data
-def load_data(file_path: str) -> Tuple[pd.DataFrame, List[str]]:
+def load_data(user_file: str, tools_file: str) -> Tuple[pd.DataFrame, List[str], pd.DataFrame]:
     """
-    Load and preprocess purchase history data for association rule mining.
+    Load and preprocess user purchase history and tool metadata.
     
     Args:
-        file_path (str): Path to the Excel file containing purchase data.
+        user_file (str): Path to the Excel file containing user purchases.
+        tools_file (str): Path to the Excel file containing product metadata.
 
     Returns:
-        Tuple containing association rules DataFrame and list of all products.
+        Tuple of rules DataFrame, product code list, and product metadata DataFrame.
     """
-    df = pd.read_excel(file_path)
-    transactions = df['previousPurchases'].dropna().apply(lambda x: x.split('|')).tolist()
+    df_users = pd.read_excel(user_file)
+    df_tools = pd.read_excel(tools_file)
+
+    transactions = df_users['previousPurchases'].dropna().apply(lambda x: x.split('|')).tolist()
 
     encoder = TransactionEncoder()
     transaction_array = encoder.fit(transactions).transform(transactions)
     df_encoded = pd.DataFrame(transaction_array, columns=encoder.columns_)
 
-    # Apply Apriori algorithm
     frequent_itemsets = apriori(df_encoded, min_support=0.2, use_colnames=True)
     rules = association_rules(frequent_itemsets, metric="lift", min_threshold=1.0)
 
-    return rules, list(encoder.columns_)
+    return rules, list(encoder.columns_), df_tools
 
 
 # --------------------------
 # Recommendation Logic
 # --------------------------
 def recommend_products(purchased_items: List[str], rules_df: pd.DataFrame, top_n: int = 5) -> List[str]:
-    """
-    Generate product recommendations based on association rules.
-
-    Args:
-        purchased_items (List[str]): List of products user has already purchased.
-        rules_df (pd.DataFrame): DataFrame containing association rules.
-        top_n (int): Number of recommendations to return.
-
-    Returns:
-        List of recommended products.
-    """
     purchased_set = set(purchased_items)
     matches = []
 
@@ -69,28 +60,48 @@ def recommend_products(purchased_items: List[str], rules_df: pd.DataFrame, top_n
     return recommendations
 
 
+def get_product_details(recommendations: List[str], df_tools: pd.DataFrame) -> pd.DataFrame:
+    """
+    Match recommended product codes to tool metadata.
+
+    Args:
+        recommendations (List[str]): List of recommended product codes.
+        df_tools (pd.DataFrame): Product metadata DataFrame.
+
+    Returns:
+        pd.DataFrame: Filtered product info.
+    """
+    filtered_tools = df_tools[df_tools['Title'].str.contains('|'.join(recommendations), case=False)]
+    return filtered_tools
+
+
 # --------------------------
 # Streamlit Web Interface
 # --------------------------
 st.set_page_config(page_title="Surgical Tool Recommender", layout="centered")
 st.title("📈 Surgical Tool Recommendation System")
 
-DATA_FILE = "surgical_tool_recommendation_users.xlsx"
+USER_FILE = "surgical_tool_recommendation_users.xlsx"
+TOOLS_FILE = "Tools_2.xlsx"
 
-# Load rules and products
-rules, product_list = load_data(DATA_FILE)
+rules, product_list, df_tools = load_data(USER_FILE, TOOLS_FILE)
 
-# User input
 selected_tools = st.multiselect("Select previously purchased tools:", product_list)
 
-# Show recommendations
 if st.button("Get Recommendations"):
     if selected_tools:
-        results = recommend_products(selected_tools, rules)
-        if results:
+        recs = recommend_products(selected_tools, rules)
+        if recs:
             st.success("Recommended Products:")
-            for item in results:
-                st.write(f"- {item}")
+            detailed = get_product_details(recs, df_tools)
+            if not detailed.empty:
+                for _, row in detailed.iterrows():
+                    st.markdown(f"### [{row['Title']}]({row['Title_URL']})")
+                    st.image(row['Image'], width=150)
+                    st.write(f"**Price:** {row['Price']}  ")
+                    st.write("---")
+            else:
+                st.info("Recommendations found, but no detailed info available in Tools_2.xlsx.")
         else:
             st.info("No strong recommendations found for the selected tools.")
     else:
