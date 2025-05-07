@@ -88,21 +88,19 @@ TOOLS_FILE = "Tools_2.xlsx"
 
 rules, product_list, df_users, df_tools = load_data(USER_FILE, TOOLS_FILE)
 
-user_ids = df_users['user_id'].unique().tolist()
-selected_user = st.selectbox("Select a user to generate recommendations:", user_ids)
-
-user_data = df_users[df_users['user_id'] == selected_user]
+specific_user_id = "user_123"  # <-- Set your specific user ID here
+user_data = df_users[df_users['user_id'] == specific_user_id]
 purchased = []
 if not user_data.empty:
     purchase_str = user_data.iloc[0]['previousPurchases']
     if pd.notna(purchase_str):
         purchased = purchase_str.split('|')
 
-if st.button("Get Recommendations"):
+if st.button("Get Recommendations for Specific User"):
     if purchased:
         recs = recommend_products(purchased, rules)
         if recs:
-            st.success("Recommended Products:")
+            st.success(f"Recommended Products for {specific_user_id}:")
             detailed = get_product_details(recs, df_tools)
             if not detailed.empty:
                 for _, row in detailed.iterrows():
@@ -117,4 +115,4 @@ if st.button("Get Recommendations"):
         else:
             st.warning("No association rules matched this user's purchase history.")
     else:
-        st.warning("No purchase history found for the selected user.")
+        st.warning("No purchase history found for the specified user.")
